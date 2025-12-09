@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { query } = require('../config/database');
+const { writeOperationLimiter } = require('../middleware/rateLimiter');
 
 // Get all patients
 router.get('/', async (req, res) => {
@@ -112,7 +113,7 @@ router.get('/search/documento/:numero', async (req, res) => {
 });
 
 // Create new patient
-router.post('/', async (req, res) => {
+router.post('/', writeOperationLimiter, async (req, res) => {
     const client = await query('SELECT 1').then(() => require('../config/database').pool.connect());
     
     try {
@@ -163,7 +164,7 @@ router.post('/', async (req, res) => {
 });
 
 // Update patient
-router.put('/:id', async (req, res) => {
+router.put('/:id', writeOperationLimiter, async (req, res) => {
     const client = await query('SELECT 1').then(() => require('../config/database').pool.connect());
     
     try {
@@ -218,7 +219,7 @@ router.put('/:id', async (req, res) => {
 });
 
 // Delete patient (soft delete)
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', writeOperationLimiter, async (req, res) => {
     try {
         const { id } = req.params;
         await query('UPDATE paciente SET activo = FALSE WHERE id_paciente = $1', [id]);

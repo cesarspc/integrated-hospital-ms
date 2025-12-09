@@ -4,6 +4,7 @@ const bodyParser = require('body-parser');
 require('dotenv').config();
 
 const { testConnection } = require('./config/database');
+const { apiLimiter, federatedQueryLimiter } = require('./middleware/rateLimiter');
 
 // Import routes
 const pacienteRoutes = require('./routes/paciente');
@@ -24,6 +25,9 @@ app.use(cors({
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
+// Apply rate limiting to all API routes
+app.use('/api/', apiLimiter);
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', message: 'Hospital Management System API' });
@@ -35,7 +39,8 @@ app.use('/api/citas', citaRoutes);
 app.use('/api/empleados', empleadoRoutes);
 app.use('/api/historial-clinica', historialRoutes);
 app.use('/api/medicamentos', medicamentoRoutes);
-app.use('/api/federated', federatedRoutes);
+// Apply stricter rate limiting for federated queries (they're more expensive)
+app.use('/api/federated', federatedQueryLimiter, federatedRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {

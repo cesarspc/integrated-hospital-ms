@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { query } = require('../config/database');
+const { writeOperationLimiter } = require('../middleware/rateLimiter');
 
 // Get medical records by patient ID
 router.get('/paciente/:id', async (req, res) => {
@@ -117,7 +118,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // Create new medical record
-router.post('/', async (req, res) => {
+router.post('/', writeOperationLimiter, async (req, res) => {
     const client = await query('SELECT 1').then(() => require('../config/database').pool.connect());
     
     try {
@@ -169,7 +170,7 @@ router.post('/', async (req, res) => {
 });
 
 // Update medical record
-router.put('/:id', async (req, res) => {
+router.put('/:id', writeOperationLimiter, async (req, res) => {
     try {
         const { id } = req.params;
         const {
