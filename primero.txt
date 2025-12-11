@@ -1,0 +1,431 @@
+-- #################################################################
+-- NODO A: HOSPITAL_CENTRAL (SEDE 1)
+-- #################################################################
+
+-- 1. LIMPIEZA INICIAL
+DROP TABLE IF EXISTS AuditoriaAcceso, ReporteMedico, Equipamiento, Cita, Prescripcion, HistoriaClinica, Provee, Proveedor, Medicamento, Empleado, Departamento, Rol, Cargo, Paciente, Persona, TipoDocumento, Genero, Sede, TipoReporte, Estado, Tipo_servicio CASCADE;
+DROP USER IF EXISTS admin_central, app_a, replica_central, medico_a, enfermero_a, administrativo_a, readonly_central;
+DROP ROLE IF EXISTS admin_hosp_central, app_hosp_central, replica_role, medico_role, enfermero_role, admin_local_role;
+
+-- 2. EXTENSIONES Y SEGURIDAD
+CREATE EXTENSION IF NOT EXISTS dblink;
+CREATE EXTENSION IF NOT EXISTS pgcrypto; -- Para encriptación de contraseñas
+
+-- 3. MODELO DE DATOS (CREATE TABLE) - MISMO ESQUEMA
+
+CREATE TABLE Sede (
+  id_sede INTEGER PRIMARY KEY,
+  nombre_sede VARCHAR(50) NOT NULL
+);
+
+CREATE TABLE Genero (
+  cod_genero INTEGER PRIMARY KEY,
+  nom_genero VARCHAR(20) NOT NULL
+);
+
+CREATE TABLE TipoDocumento (
+  id_tipo_doc INTEGER PRIMARY KEY,
+  nom_tipo_doc VARCHAR(20) NOT NULL
+);
+
+CREATE TABLE Persona (
+  documento INTEGER PRIMARY KEY,
+  nombre_completo VARCHAR(50) NOT NULL,
+  telefono VARCHAR(20) NOT NULL,
+  correo VARCHAR(50) NOT NULL,
+  id_genero INTEGER NOT NULL,
+  id_tipo_doc INTEGER NOT NULL,
+  id_sede_origen INTEGER NOT NULL, -- para fragmentación por sede
+  FOREIGN KEY (id_genero) REFERENCES Genero(cod_genero),
+  FOREIGN KEY (id_tipo_doc) REFERENCES TipoDocumento(id_tipo_doc),
+  FOREIGN KEY (id_sede_origen) REFERENCES Sede(id_sede) -- Sede debe existir en maestros
+);
+
+CREATE TABLE Paciente (
+  cod_pac INTEGER PRIMARY KEY,
+  direccion VARCHAR(50) NOT NULL,
+  documento INTEGER NOT NULL,
+  id_sede INTEGER NOT NULL,             
+  FOREIGN KEY (documento) REFERENCES Persona(documento),
+  FOREIGN KEY (id_sede) REFERENCES Sede(id_sede)
+);
+
+CREATE TABLE Cargo (
+  id_cargo INTEGER PRIMARY KEY,
+  nombre_cargo VARCHAR(50) NOT NULL
+);
+
+CREATE TABLE Rol (
+  id_rol INTEGER PRIMARY KEY,
+  nombre_rol VARCHAR(50) NOT NULL
+);
+
+
+
+CREATE TABLE Departamento (
+  id_dept INTEGER NOT NULL,
+  nom_dept VARCHAR(50) NOT NULL,
+  id_sede INTEGER NOT NULL,
+  PRIMARY KEY (id_dept, id_sede),
+  FOREIGN KEY (id_sede) REFERENCES Sede(id_sede)
+);
+
+CREATE TABLE Empleado (
+  id_emp INTEGER PRIMARY KEY,
+  hash_contra VARCHAR(200) NOT NULL, 
+  documento INTEGER NOT NULL,
+  id_cargo INTEGER NOT NULL,
+  id_rol INTEGER NOT NULL,
+  id_dept INTEGER NOT NULL,
+  id_sede INTEGER NOT NULL,
+  FOREIGN KEY (documento) REFERENCES Persona(documento),
+  FOREIGN KEY (id_cargo) REFERENCES Cargo(id_cargo),
+  FOREIGN KEY (id_rol) REFERENCES Rol(id_rol),
+  FOREIGN KEY (id_dept, id_sede) REFERENCES Departamento(id_dept, id_sede),
+  FOREIGN KEY (id_sede) REFERENCES Sede(id_sede)
+);
+
+CREATE TABLE Medicamento (
+  cod_med INTEGER PRIMARY KEY,
+  nom_med VARCHAR(50) NOT NULL,
+  descripcion VARCHAR(50) NOT NULL,
+  stock INTEGER NOT NULL CHECK (stock > 0),
+  unidad VARCHAR(50) NOT NULL
+);
+
+CREATE TABLE Proveedor (
+  cod_prov INTEGER PRIMARY KEY,
+  nombre_prov VARCHAR(50) NOT NULL
+);
+
+CREATE TABLE Provee (
+  cod_prov INTEGER NOT NULL,
+  cod_med INTEGER NOT NULL,
+  PRIMARY KEY (cod_prov, cod_med),
+  FOREIGN KEY (cod_prov) REFERENCES Proveedor(cod_prov),
+  FOREIGN KEY (cod_med) REFERENCES Medicamento(cod_med)
+);
+
+CREATE TABLE HistoriaClinica (
+  cod_hist INTEGER PRIMARY KEY,
+  fecha_registro DATE NOT NULL,
+  diagnostico VARCHAR(200),
+  cod_medico INTEGER NOT NULL,
+  cod_pac INTEGER NOT NULL,
+  id_sede INTEGER NOT NULL,
+  FOREIGN KEY (cod_medico) REFERENCES Empleado(id_emp),
+  FOREIGN KEY (cod_pac) REFERENCES Paciente(cod_pac),
+  FOREIGN KEY (id_sede) REFERENCES Sede(id_sede)
+);
+
+CREATE TABLE Prescripcion (
+  id_presc INTEGER PRIMARY KEY,
+  dosis VARCHAR(50) NOT NULL,
+  frecuencia VARCHAR(50) NOT NULL,
+  duracion VARCHAR(50) NOT NULL,
+  fecha_emision DATE NOT NULL,
+  cod_med INTEGER,  
+  cod_prov INTEGER, 
+  cod_hist INTEGER NOT NULL,
+  FOREIGN KEY (cod_prov, cod_med) REFERENCES Provee(cod_prov, cod_med),
+  FOREIGN KEY (cod_hist) REFERENCES HistoriaClinica(cod_hist)
+);
+
+CREATE TABLE Tipo_servicio (
+  id_servicio INTEGER PRIMARY KEY,
+  nom_servicio VARCHAR(50) NOT NULL
+);
+
+CREATE TABLE Estado (
+  id_estado INTEGER PRIMARY KEY,
+  nom_estado VARCHAR(50) NOT NULL
+);
+
+CREATE TABLE Cita (
+  id_cita INTEGER PRIMARY KEY,
+  fecha DATE NOT NULL,
+  hora TIME NOT NULL,
+  id_servicio INTEGER NOT NULL,
+  id_estado INTEGER NOT NULL,
+  id_emp INTEGER NOT NULL,
+  id_dept INTEGER NOT NULL,
+  id_sede INTEGER NOT NULL,
+  FOREIGN KEY (id_servicio) REFERENCES Tipo_servicio(id_servicio),
+  FOREIGN KEY (id_estado) REFERENCES Estado(id_estado),
+  FOREIGN KEY (id_emp) REFERENCES Empleado(id_emp),
+  FOREIGN KEY (id_dept, id_sede) REFERENCES Departamento(id_dept, id_sede),
+  FOREIGN KEY (id_sede) REFERENCES Sede(id_sede)
+);
+
+CREATE TABLE Equipamiento (
+  cod_eq INTEGER PRIMARY KEY,
+  nom_eq VARCHAR(50) NOT NULL,
+  fecha_mantenimiento DATE,
+  estado VARCHAR(50) NOT NULL,
+  responsable INTEGER NOT NULL,
+  id_dept INTEGER NOT NULL,
+  id_sede INTEGER NOT NULL,
+  FOREIGN KEY (responsable) REFERENCES Empleado(id_emp),
+  FOREIGN KEY (id_dept, id_sede) REFERENCES Departamento(id_dept, id_sede),
+  FOREIGN KEY (id_sede) REFERENCES Sede(id_sede)
+);
+
+CREATE TABLE TipoReporte (
+  id_tipo_reporte INTEGER PRIMARY KEY,
+  nombre_tipo_reporte VARCHAR(50) NOT NULL
+);
+
+CREATE TABLE ReporteMedico (
+  id_reporte INTEGER PRIMARY KEY,
+  fecha_generacion DATE NOT NULL,
+  resumen VARCHAR(200) NOT NULL,
+  id_tipo_reporte INTEGER NOT NULL,
+  id_sede INTEGER NOT NULL,
+  FOREIGN KEY (id_tipo_reporte) REFERENCES TipoReporte(id_tipo_reporte),
+  FOREIGN KEY (id_sede) REFERENCES Sede(id_sede)
+);
+
+CREATE TABLE AuditoriaAcceso (
+  id_evento INTEGER PRIMARY KEY,
+  accion VARCHAR(50) NOT NULL,
+  tabla_afectada VARCHAR(50) NOT NULL,
+  fecha_evento TIMESTAMP NOT NULL DEFAULT now(),
+  ip_origen VARCHAR(50) NOT NULL,
+  id_emp INTEGER NOT NULL,
+  FOREIGN KEY (id_emp) REFERENCES Empleado(id_emp)
+);
+
+
+
+
+-- 4. ROLES DISTRIBUIDOS Y USUARIOS
+CREATE ROLE admin_hosp_central; -- Administración local
+CREATE ROLE app_hosp_central;   -- Rol de Aplicación (acceso CRUD local)
+CREATE ROLE replica_role;       -- Rol para la replicación (compartido entre nodos)
+
+-- Roles de negocio
+CREATE ROLE medico_role;
+CREATE ROLE enfermero_role;
+CREATE ROLE admin_local_role;
+
+-- Usuarios de conexión (contraseña encriptada para ejemplo)
+CREATE USER admin_central WITH PASSWORD '123Nicolas*' IN ROLE admin_hosp_central;
+CREATE USER app_a WITH PASSWORD '123Nicolas*' IN ROLE app_hosp_central;
+CREATE USER replica_central WITH PASSWORD '123Nicolas*' IN ROLE replica_role; -- Usuario para dblink
+CREATE USER readonly_central WITH PASSWORD '123Nicolas*';
+
+-- Usuarios de negocio (con hash de ejemplo)
+-- La clave '1234' hasheada con pgcrypto: $1$d000623a$F.JzP9Fh7E/0gA5zL8oN7.
+CREATE USER medico_a WITH PASSWORD '1234' IN ROLE medico_role;
+CREATE USER enfermero_a WITH PASSWORD '1234' IN ROLE enfermero_role;
+CREATE USER administrativo_a WITH PASSWORD '1234' IN ROLE admin_local_role;
+
+
+-- 5. GRANTS ESPECÍFICOS POR ROL Y NODO (Sede 1)
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO admin_hosp_central;
+
+-- app_hosp_central (CRUD local en tablas clave)
+GRANT SELECT, INSERT, UPDATE, DELETE ON Persona, Paciente, Empleado, HistoriaClinica, Prescripcion, Cita, Equipamiento TO app_hosp_central;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO app_hosp_central; -- SELECT en el resto de tablas maestras
+
+-- medico_role (Ver HC, insertar HC/Prescripción/Cita, ver empleados/pacientes)
+GRANT SELECT ON Persona, Paciente, Empleado, HistoriaClinica, Prescripcion, Cita, Medicamento TO medico_role;
+GRANT INSERT, UPDATE ON HistoriaClinica, Prescripcion, Cita TO medico_role;
+GRANT USAGE ON SCHEMA public TO medico_role;
+
+-- enfermero_role (Ver Citas/Pacientes, Actualizar estado de citas, ver Equipamiento)
+GRANT SELECT ON Cita, Paciente, Persona, Equipamiento TO enfermero_role;
+GRANT UPDATE ON Cita TO enfermero_role;
+GRANT USAGE ON SCHEMA public TO enfermero_role;
+
+-- admin_local_role (Gestionar Citas, Empleados, Reportes)
+GRANT SELECT, INSERT, UPDATE, DELETE ON Empleado, Cita, ReporteMedico TO admin_local_role;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO admin_local_role;
+
+
+-- 6. RLS (Sólo Sede 1)
+
+
+ALTER TABLE Persona ENABLE ROW LEVEL SECURITY;
+ALTER TABLE Paciente ENABLE ROW LEVEL SECURITY;
+ALTER TABLE Empleado ENABLE ROW LEVEL SECURITY;
+ALTER TABLE HistoriaClinica ENABLE ROW LEVEL SECURITY;
+ALTER TABLE Cita ENABLE ROW LEVEL SECURITY;
+ALTER TABLE Equipamiento ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ReporteMedico ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY persona_local_policy ON Persona USING (id_sede_origen = 1) WITH CHECK (id_sede_origen = 1);
+ALTER TABLE Persona FORCE ROW LEVEL SECURITY;
+CREATE POLICY paciente_local_policy ON Paciente USING (id_sede = 1) WITH CHECK (id_sede = 1);
+ALTER TABLE Paciente FORCE ROW LEVEL SECURITY;
+CREATE POLICY empleado_local_policy ON Empleado USING (id_sede = 1) WITH CHECK (id_sede = 1);
+ALTER TABLE Empleado FORCE ROW LEVEL SECURITY;
+CREATE POLICY hc_local_policy ON HistoriaClinica USING (id_sede = 1) WITH CHECK (id_sede = 1);
+ALTER TABLE HistoriaClinica FORCE ROW LEVEL SECURITY;
+CREATE POLICY cita_local_policy ON Cita USING (id_sede = 1) WITH CHECK (id_sede = 1);
+ALTER TABLE Cita FORCE ROW LEVEL SECURITY;
+CREATE POLICY equip_local_policy ON Equipamiento USING (id_sede = 1) WITH CHECK (id_sede = 1);
+ALTER TABLE Equipamiento FORCE ROW LEVEL SECURITY;
+CREATE POLICY rep_local_policy ON ReporteMedico USING (id_sede = 1) WITH CHECK (id_sede = 1);
+ALTER TABLE ReporteMedico FORCE ROW LEVEL SECURITY;
+
+
+-- 7. CONFIGURACIÓN DE CONEXIONES REMOTAS (DBLINK)
+-- Se asume que NODO B (Clínica Norte) y NODO C (Hospital Sur) están en su base de datos.
+-- Si usas dblink, debes crear el servidor remoto (esto puede variar según el entorno)
+-- EJEMPLO: 
+-- SELECT dblink_connect('clinica_norte', 'hostaddr=127.0.0.1 dbname=clinica_norte user=replica_central password=123Nicolas*');
+
+
+-- 8. INSERCIÓN DE DATOS DE PRUEBA (SOLO SEDE 1 y Datos Comunes)
+
+
+
+-- 9. VISTA DISTRIBUIDA Y AGREGACIÓN
+-- VISTA DE MEDICAMENTOS GLOBAL (Simulación de Replicación COMPLETA)
+CREATE OR REPLACE VIEW Medicamentos_Global AS
+SELECT * FROM Medicamento
+UNION ALL
+SELECT * FROM dblink('clinica_norte', 'SELECT cod_med, nom_med, descripcion, stock, unidad FROM Medicamento') AS t1(cod_med int, nom_med varchar, descripcion varchar, stock int, unidad varchar)
+UNION ALL
+SELECT * FROM dblink('hospital_sur', 'SELECT cod_med, nom_med, descripcion, stock, unidad FROM Medicamento') AS t2(cod_med int, nom_med varchar, descripcion varchar, stock int, unidad varchar);
+
+
+-- VISTA DE HISTORIAS CLÍNICAS GLOBAL (Simulación de Replicación PARCIAL)
+CREATE OR REPLACE VIEW HistoriaClinica_Global AS
+SELECT * FROM HistoriaClinica -- Datos locales (Sede 1)
+UNION ALL
+SELECT * FROM dblink('clinica_norte', 'SELECT cod_hist, fecha_registro, diagnostico, cod_medico, cod_pac, id_sede FROM HistoriaClinica') AS t1(cod_hist int, fecha_registro date, diagnostico varchar, cod_medico int, cod_pac int, id_sede int)
+UNION ALL
+SELECT * FROM dblink('hospital_sur', 'SELECT cod_hist, fecha_registro, diagnostico, cod_medico, cod_pac, id_sede FROM HistoriaClinica') AS t2(cod_hist int, fecha_registro date, diagnostico varchar, cod_medico int, cod_pac int, id_sede int);
+
+
+-- CONSULTA AGREGADA (Requiere vistas globales para datos entre sedes)
+-- Top 5 enfermedades más tratadas por departamento en el último trimestre (Simulado)
+CREATE OR REPLACE VIEW Top_Enfermedades_QTR AS
+SELECT 
+    d.nom_dept,
+    h.diagnostico AS enfermedad,
+    COUNT(h.cod_hist) AS total_casos,
+    s.nombre_sede
+FROM 
+    HistoriaClinica_Global h
+JOIN 
+    Empleado e ON h.cod_medico = e.id_emp
+JOIN 
+    Departamento d ON e.id_dept = d.id_dept AND e.id_sede = d.id_sede
+JOIN
+    Sede s ON h.id_sede = s.id_sede
+WHERE 
+    h.fecha_registro >= date_trunc('quarter', CURRENT_DATE - interval '3 month')
+GROUP BY 1, 2, 4
+ORDER BY total_casos DESC
+LIMIT 5;
+
+
+
+
+-- #################################################################
+-- SCRIPT: NODO A - HOSPITAL CENTRAL (SEDE 1)
+-- Ejecutar como Superusuario (postgres)
+-- #################################################################
+
+-- 1. DATOS MAESTROS COMUNES (Mismos en todos los nodos)
+INSERT INTO Sede (id_sede, nombre_sede) VALUES 
+(1, 'Sede Central'), (2, 'Sede Regional Norte'), (3, 'Sede Regional Sur') 
+ON CONFLICT (id_sede) DO NOTHING;
+
+INSERT INTO Genero (cod_genero, nom_genero) VALUES 
+(1, 'Masculino'), (2, 'Femenino') 
+ON CONFLICT (cod_genero) DO NOTHING;
+
+INSERT INTO TipoDocumento (id_tipo_doc, nom_tipo_doc) VALUES 
+(1, 'Cedula') 
+ON CONFLICT (id_tipo_doc) DO NOTHING;
+
+INSERT INTO Cargo (id_cargo, nombre_cargo) VALUES 
+(1, 'Médico General'), (2, 'Enfermero Jefe'), (3, 'Administrador TI') 
+ON CONFLICT (id_cargo) DO NOTHING;
+
+INSERT INTO Rol (id_rol, nombre_rol) VALUES 
+(1, 'App Hospital'), (2, 'Administrador Local'), (3, 'Médico Tratante') 
+ON CONFLICT (id_rol) DO NOTHING;
+
+INSERT INTO Medicamento (cod_med, nom_med, descripcion, stock, unidad) VALUES 
+(101, 'Ibuprofeno', 'Analgésico', 500, 'Caja'), (102, 'Amoxicilina', 'Antibiótico', 300, 'Caja')
+ON CONFLICT (cod_med) DO NOTHING;
+
+INSERT INTO Proveedor (cod_prov, nombre_prov) VALUES 
+(1, 'Farmaceutica Alfa') 
+ON CONFLICT (cod_prov) DO NOTHING;
+
+INSERT INTO Provee (cod_prov, cod_med) VALUES 
+(1, 101), (1, 102) 
+ON CONFLICT (cod_prov, cod_med) DO NOTHING;
+
+INSERT INTO Tipo_servicio (id_servicio, nom_servicio) VALUES (1, 'Consulta General') ON CONFLICT (id_servicio) DO NOTHING;
+INSERT INTO Estado (id_estado, nom_estado) VALUES (1, 'Programada'), (2, 'Realizada') ON CONFLICT (id_estado) DO NOTHING;
+INSERT INTO TipoReporte (id_tipo_reporte, nombre_tipo_reporte) VALUES (1, 'Reporte de Ingreso') ON CONFLICT (id_tipo_reporte) DO NOTHING;
+
+
+-- 2. DATOS DE FRAGMENTACIÓN LOCAL (id_sede = 1)
+INSERT INTO Departamento (id_dept, nom_dept, id_sede) VALUES
+(10, 'Medicina General', 1) ON CONFLICT (id_dept, id_sede) DO NOTHING;
+
+-- Persona (id_sede_origen = 1)
+INSERT INTO Persona (documento, nombre_completo, telefono, correo, id_genero, id_tipo_doc, id_sede_origen) VALUES
+(1001, 'Laura Gomez (P-CEN)', '3101234567', 'laura@central.com', 2, 1, 1),
+(1002, 'Dr. Carlos Ruiz (E-CEN)', '3101234568', 'carlos@central.com', 1, 1, 1)
+ON CONFLICT (documento) DO NOTHING;
+
+-- Empleado (id_sede = 1)
+INSERT INTO Empleado (id_emp, hash_contra, documento, id_cargo, id_rol, id_dept, id_sede) VALUES
+(100, 'hash_dr_ruiz', 1002, 1, 3, 10, 1) ON CONFLICT (id_emp) DO NOTHING;
+
+-- Paciente (id_sede = 1)
+INSERT INTO Paciente (cod_pac, direccion, documento, id_sede) VALUES
+(10, 'Calle 50 # 3-15', 1001, 1) ON CONFLICT (cod_pac) DO NOTHING;
+
+-- HistoriaClinica (id_sede = 1)
+INSERT INTO HistoriaClinica (cod_hist, fecha_registro, diagnostico, cod_medico, cod_pac, id_sede) VALUES
+(1, '2025-10-01', 'Gripe común', 100, 10, 1) ON CONFLICT (cod_hist) DO NOTHING;
+
+-- Cita (id_sede = 1)
+INSERT INTO Cita (id_cita, fecha, hora, id_servicio, id_estado, id_emp, id_dept, id_sede) VALUES
+(1, '2025-12-15', '09:00:00', 1, 1, 100, 10, 1) ON CONFLICT (id_cita) DO NOTHING;
+
+-- Equipamiento (id_sede = 1)
+INSERT INTO Equipamiento (cod_eq, nom_eq, fecha_mantenimiento, estado, responsable, id_dept, id_sede) VALUES
+(1, 'Máquina Rayos X', '2025-11-01', 'Operativo', 100, 10, 1) ON CONFLICT (cod_eq) DO NOTHING;
+
+INSERT INTO ReporteMedico (id_reporte, fecha_generacion, resumen, id_tipo_reporte, id_sede) VALUES
+(1, '2025-10-02', 'Informe de ingreso Paciente 10', 1, 1) ON CONFLICT (id_reporte) DO NOTHING;
+
+INSERT INTO AuditoriaAcceso (id_evento, accion, tabla_afectada, ip_origen, id_emp) VALUES (1, 'SELECT', 'Persona', '192.168.1.100', 100) ON CONFLICT (id_evento) DO NOTHING;
+
+
+-- 3. PRUEBAS PARA ROL DE APLICACIÓN LOCAL (app_a)
+-- -----------------------------------------------------------------
+
+-- Cambiar al rol de aplicación (app_a)
+SET ROLE app_hosp_central; 
+
+-- Consulta 1: Verificar RLS. Debe mostrar SOLO los 2 registros locales (Sede 1).
+SELECT COUNT(*), 'Consulta 1: RLS en Persona (Sede 1)' AS Prueba
+FROM Persona;
+
+-- Consulta 2: Verificar permisos CRUD (INSERT).
+INSERT INTO Persona (documento, nombre_completo, telefono, correo, id_genero, id_tipo_doc, id_sede_origen) 
+VALUES (1003, 'Nuevo Paciente (Sede 1)', '3100000000', 'nuevo@central.com', 2, 1, 1)
+ON CONFLICT (documento) DO NOTHING;
+SELECT COUNT(*), 'Consulta 2: Insert exitoso (Sede 1)' AS Prueba
+FROM Persona WHERE documento = 1003;
+
+-- Volver al superusuario
+RESET ROLE;
+
+-- FIN NODO A
+
+
+
+-- FIN NODO A
